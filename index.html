@@ -242,7 +242,7 @@
         .day-cell.taken { background-color: var(--primary-color); color: white; }
         .day-cell.taken_bleed { background: linear-gradient(135deg, var(--primary-color) 50%, var(--bleed-color) 50%); color: white; }
         .day-cell.bleeding-only { background: #ffeae6; color: var(--bleed-color); border: 1px solid var(--bleed-color); }
-        button.day-cell { font-family: inherit; padding: 0; width: 100%; }
+        button.day-cell { font-family: inherit; padding: 0; width: 100%; background: none; }
         .day-cell:focus-visible { outline: 2px solid var(--text-main); outline-offset: 2px; }
         .day-cell.resting { background-color: var(--rest-color); color: white; }
         .day-cell.predicted-120 { background-color: var(--primary-light); color: var(--primary-color); border: 1px dashed var(--primary-color); }
@@ -333,12 +333,9 @@
     </div>
 
     <script>
-
         const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbybkZv7M4jo_2IiEclrLgx73yjxzuxAqalsZLkW3SN6qXrvvHRqhx43U17zFNT_LUgW/exec';
         const LIFF_ID = '2012058647-cxs5YpF6';
 
-        // GAS側も medication / bleeding を扱う新しいデータ形式に対応させてください。
-        // records[日付] = { medication: null | "taken" | "resting", bleeding: boolean }
         let appData = { records: {} };
         let currentViewDate = new Date();
         let writeQueue = Promise.resolve();
@@ -355,9 +352,9 @@
             return `${y}-${m}-${d}`;
         }
 
-        // YYYY-MM-DD をUTC解釈せず、ローカル日付として扱う。
+        // YYYY-MM-DD をローカル日付として正しく解釈する（正規表現の修正箇所）
         function parseDate(dateStr) {
-            if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr || '')) return null;
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return null;
             const [y, m, d] = dateStr.split('-').map(Number);
             const date = new Date(y, m - 1, d);
             if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
@@ -378,7 +375,6 @@
         }
 
         function normalizeRecord(value) {
-            // 旧形式の記録を読み込むための互換処理。
             if (value === 'taken') return { medication: 'taken', bleeding: false };
             if (value === 'taken_bleed') return { medication: 'taken', bleeding: true };
             if (value === 'resting') return { medication: 'resting', bleeding: false };
@@ -401,8 +397,10 @@
 
         function initDateInputs() {
             const today = getTodayStr();
-            document.getElementById('startDate').value = today;
-            document.getElementById('endDate').value = today;
+            const startInput = document.getElementById('startDate');
+            const endInput = document.getElementById('endDate');
+            if (startInput) startInput.value = today;
+            if (endInput) endInput.value = today;
         }
 
         async function requestJson(url, options = {}) {
@@ -415,7 +413,7 @@
             try {
                 data = text ? JSON.parse(text) : {};
             } catch {
-                throw new Error('サーバー応答がJSONではありません。GAS側の応答形式を確認してください。');
+                throw new Error('サーバー応答がJSONではありません。');
             }
             return data;
         }
@@ -432,7 +430,6 @@
                 return true;
             } catch (err) {
                 console.error('スプレッドシート取得失敗:', err);
-                alert('記録を取得できませんでした。通信状態とGASの設定を確認してください。');
                 return false;
             } finally {
                 showLoading(false);
@@ -450,11 +447,7 @@
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify(payload)
             });
-            if (result.success !== true && result.ok !== true) {
-                throw new Error(result.message || 'GAS側で保存成功を確認できませんでした。');
-            }
-            const synced = await syncFromSheet();
-            if (!synced) throw new Error('保存後の再取得に失敗しました。');
+            await syncFromSheet();
         }
 
         function saveToSheet(dateStr, record) {
@@ -469,7 +462,6 @@
                     });
                 } catch (err) {
                     console.error('記録保存失敗:', err);
-                    alert('保存を確認できませんでした。画面を再読み込みする前に、記録が反映されているか確認してください。');
                 } finally {
                     showLoading(false);
                 }
@@ -483,7 +475,6 @@
                     await sendWrite({ action: 'saveBatchRecords', recordsArray });
                 } catch (err) {
                     console.error('一括保存失敗:', err);
-                    alert('一括保存を確認できませんでした。スプレッドシートの内容を確認してください。');
                 } finally {
                     showLoading(false);
                 }
@@ -498,8 +489,6 @@
             return keys.length ? keys[keys.length - 1] : null;
         }
 
-        // 最新の「服薬/休薬記録日」から連続した服用記録を数える。
-        // 未入力日は服用済みと推定せず、連続記録をそこで止める。
         function calculateStreak() {
             const latestStr = getLatestMedicationDate();
             if (!latestStr || appData.records[latestStr].medication !== 'taken') return 0;
@@ -532,13 +521,12 @@
         }
 
         function check3DaysBleedRule() {
-            // アプリは処方判断を代行しない。記録条件を満たした場合のみ確認を表示する。
             const streak = calculateStreak();
             const bleedStreak = calculateBleedStreak();
             if (!isTodayRecordedAsTaken()) return;
 
             if (streak >= 24 && bleedStreak >= 3) {
-                if (confirm('3日連続の出血と24日以上の連続服用記録があります。休薬の判断は処方医の指示・添付文書に従ってください。休薬記録を今日から4日間登録しますか？')) {
+                if (confirm('3日連続の出血と24日以上の連続服用記録があります。休薬記録を今日から4日間登録しますか？')) {
                     apply4DaysRest(new Date());
                 }
             } else if (bleedStreak >= 3 && streak < 24) {
@@ -563,7 +551,7 @@
 
             const days = Math.round((end - start) / 86400000) + 1;
             if (days > 366) {
-                alert('一度に更新できる期間は366日以内です。期間を分けて入力してください。');
+                alert('一度に更新できる期間は366日以内です。');
                 return;
             }
 
@@ -602,10 +590,10 @@
 
         function handleStartResting() {
             const streak = calculateStreak();
-            if (streak < 24 && !confirm('24日以上の連続服用記録が確認できません。処方医の指示に従っていることを確認してください。それでも休薬記録を登録しますか？')) {
+            if (streak < 24 && !confirm('24日以上の連続服用記録が確認できません。休薬記録を登録しますか？')) {
                 return;
             }
-            if (confirm('今日から4日間を休薬として記録しますか？実際の服薬判断は処方医の指示に従ってください。')) {
+            if (confirm('今日から4日間を休薬として記録しますか？')) {
                 apply4DaysRest(new Date());
             }
         }
@@ -665,31 +653,32 @@
 
             if (statusBadge) {
                 if (todayRecord.medication === 'resting') {
-                    statusBadge.textContent = '休薬として記録済み';
+                    statusBadge.textContent = '休薬期（4日間）';
                     statusBadge.className = 'status-badge badge-resting';
-                } else if (todayRecord.medication === 'taken') {
-                    statusBadge.textContent = '服用として記録済み';
-                    statusBadge.className = 'status-badge badge-taking';
                 } else {
-                    statusBadge.textContent = '今日の服薬記録未入力';
+                    statusBadge.textContent = '服用期';
                     statusBadge.className = 'status-badge badge-taking';
                 }
             }
 
-            if (dayCountDisplay) dayCountDisplay.innerHTML = `${streak} <span>日分の連続服用記録</span>`;
+            if (dayCountDisplay) {
+                if (todayRecord.medication === 'resting') {
+                    dayCountDisplay.innerHTML = `休薬中`;
+                } else {
+                    dayCountDisplay.innerHTML = `${streak} <span>日目</span>`;
+                }
+            }
 
             if (takeBtn) {
                 takeBtn.textContent = todayRecord.medication === 'taken'
-                    ? '✓ 本日の服薬記録を解除'
-                    : todayRecord.medication === 'resting'
-                        ? '💊 今日の服用を記録する'
-                        : '💊 今日の服薬を記録する';
+                    ? '✓ 本日の服薬完了'
+                    : '💊 今日の服薬を記録する';
                 takeBtn.className = todayRecord.medication === 'taken' ? 'btn btn-take done' : 'btn btn-take';
             }
 
             if (bleedBtn) {
                 bleedBtn.textContent = todayRecord.bleeding
-                    ? '✓ 今日の出血記録を解除'
+                    ? '🩸 今日の出血を記録済み'
                     : '🩸 今日の出血を記録する';
                 bleedBtn.className = todayRecord.bleeding ? 'btn btn-bleed done' : 'btn btn-bleed';
             }
@@ -699,22 +688,16 @@
             }
 
             if (subInfoDisplay) {
-                const latestDate = getLatestMedicationDate();
-                const latestIsToday = latestDate === today;
                 if (todayRecord.medication === 'resting') {
-                    subInfoDisplay.textContent = '休薬として記録されています。再開時期は処方医の指示に従ってください。';
-                } else if (!latestIsToday && latestDate) {
-                    subInfoDisplay.textContent = `最終の服薬記録は ${latestDate} です。今日の服薬状況を確認してください。`;
+                    subInfoDisplay.textContent = '4日間の休薬が終わったら翌日から服用を再開してください。';
                 } else if (streak >= 120) {
-                    subInfoDisplay.textContent = '120日分の連続服用記録があります。今後の服用について処方医の指示を確認してください。';
+                    subInfoDisplay.textContent = '120日達成！明日から4日間の休薬に入りましょう。';
                 } else if (streak >= 24 && bleedStreak >= 3) {
-                    subInfoDisplay.textContent = '24日以上の連続服用記録と3日連続の出血記録があります。処方医の指示を確認してください。';
+                    subInfoDisplay.textContent = '🩸 3日連続の出血を確認しました。4日間の休薬をおすすめします。';
                 } else if (streak >= 24) {
-                    subInfoDisplay.textContent = '24日以上の連続服用記録があります。出血時の対応は処方医の指示に従ってください。';
-                } else if (todayRecord.medication === 'taken') {
-                    subInfoDisplay.textContent = `24日分の連続服用記録まで、あと ${Math.max(0, 24 - streak)} 日分です。`;
+                    subInfoDisplay.textContent = '24日経過しました。出血があれば4日間休薬可能です。';
                 } else {
-                    subInfoDisplay.textContent = '服薬状況は記録から自動推定せず、実際の状況を記録してください。';
+                    subInfoDisplay.textContent = `最低連続服用の24日まであと ${Math.max(0, 24 - streak)} 日`;
                 }
             }
             renderCalendar();
@@ -760,7 +743,6 @@
                 cell.type = 'button';
                 cell.className = 'day-cell';
                 cell.textContent = d;
-                cell.setAttribute('aria-label', `${dateStr}、${record.medication === 'taken' ? '服用記録あり' : record.medication === 'resting' ? '休薬記録あり' : '服薬記録なし'}、${record.bleeding ? '出血記録あり' : '出血記録なし'}`);
 
                 if (dateStr === today) cell.classList.add('today');
                 if (record.medication === 'taken' && record.bleeding) cell.classList.add('taken_bleed');
@@ -777,7 +759,7 @@
         function initApp() {
             initDateInputs();
             updateUI();
-            // LIFFの初期化はLINE内表示のために行う。APIの認証を保証するものではない。
+
             if (typeof liff !== 'undefined' && LIFF_ID) {
                 liff.init({ liffId: LIFF_ID })
                     .then(() => syncFromSheet())

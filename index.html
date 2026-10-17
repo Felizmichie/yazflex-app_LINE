@@ -278,3 +278,52 @@
         <button id="restBtn" class="btn btn-start-rest" onclick="handleStartResting()" style="display: none;">
             ⚠️ 4日間の休薬を開始する
         </button>
+    </div>
+
+    <!-- 期間一括入力フォーム -->
+    <div class="card">
+        <h2>📅 期間指定でまとめて入力</h2>
+        <div class="date-inputs">
+            <input type="date" id="startDate">
+            <span>〜</span>
+            <input type="date" id="endDate">
+        </div>
+        <div class="range-buttons">
+            <button class="btn-sm btn-sm-take" onclick="applyBatchRecord('taken')">💊 服用をセット</button>
+            <button class="btn-sm btn-sm-bleed" onclick="applyBatchRecord('taken_bleed')">💊🩸 服用+出血</button>
+            <button class="btn-sm btn-sm-rest" onclick="applyBatchRecord('resting')">🍊 休薬をセット</button>
+            <button class="btn-sm btn-sm-clear" onclick="applyBatchRecord(null)">🧹 範囲内をクリア</button>
+        </div>
+    </div>
+
+    <!-- カレンダー表示 -->
+    <div class="card">
+        <div class="calendar-header">
+            <button class="nav-btn" onclick="changeMonth(-1)">‹</button>
+            <h2 id="calendarMonthLabel">2026年9月</h2>
+            <button class="nav-btn" onclick="changeMonth(1)">›</button>
+        </div>
+        <div class="calendar-grid" id="calendarGrid">
+            <!-- JSで動的に生成 -->
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="dot" style="background: var(--primary-color);"></div> 服用
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: linear-gradient(135deg, var(--primary-color) 50%, var(--bleed-color) 50%);"></div> 服用+出血
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: var(--rest-color);"></div> 休薬
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: var(--primary-light); border: 1px dashed var(--primary-color);"></div> 120日目
+            </div>
+        </div>
+        
+        <p class="guide-text">※カレンダーの日付をタップしても個別切り替えできます</p>
+    </div>
+
+    <script>
+        const GAS_API_URL = '

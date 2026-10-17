@@ -241,6 +241,9 @@
         .day-cell.today { border-color: var(--text-main); font-weight: bold; }
         .day-cell.taken { background-color: var(--primary-color); color: white; }
         .day-cell.taken_bleed { background: linear-gradient(135deg, var(--primary-color) 50%, var(--bleed-color) 50%); color: white; }
+        .day-cell.bleeding-only { background: #ffeae6; color: var(--bleed-color); border: 1px solid var(--bleed-color); }
+        button.day-cell { font-family: inherit; padding: 0; width: 100%; }
+        .day-cell:focus-visible { outline: 2px solid var(--text-main); outline-offset: 2px; }
         .day-cell.resting { background-color: var(--rest-color); color: white; }
         .day-cell.predicted-120 { background-color: var(--primary-light); color: var(--primary-color); border: 1px dashed var(--primary-color); }
 
@@ -316,6 +319,9 @@
                 <div class="dot" style="background: linear-gradient(135deg, var(--primary-color) 50%, var(--bleed-color) 50%);"></div> 服用+出血
             </div>
             <div class="legend-item">
+                <div class="dot" style="background: #ffeae6; border: 1px solid var(--bleed-color);"></div> 出血のみ
+            </div>
+            <div class="legend-item">
                 <div class="dot" style="background: var(--rest-color);"></div> 休薬
             </div>
             <div class="legend-item">
@@ -327,16 +333,15 @@
     </div>
 
     <script>
+
         const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbybkZv7M4jo_2IiEclrLgx73yjxzuxAqalsZLkW3SN6qXrvvHRqhx43U17zFNT_LUgW/exec';
         const LIFF_ID = '2012058647-cxs5YpF6';
 
-        let appData = {
-            records: {},
-            mode: 'taking',
-            restStartDay: null
-        };
-
+        // GAS側も medication / bleeding を扱う新しいデータ形式に対応させてください。
+        // records[日付] = { medication: null | "taken" | "resting", bleeding: boolean }
+        let appData = { records: {} };
         let currentViewDate = new Date();
+        let writeQueue = Promise.resolve();
 
         function showLoading(show) {
             const overlay = document.getElementById('loadingOverlay');
@@ -350,189 +355,257 @@
             return `${y}-${m}-${d}`;
         }
 
+        // YYYY-MM-DD をUTC解釈せず、ローカル日付として扱う。
+        function parseDate(dateStr) {
+            if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr || '')) return null;
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const date = new Date(y, m - 1, d);
+            if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) {
+                return null;
+            }
+            date.setHours(12, 0, 0, 0);
+            return date;
+        }
+
+        function addDays(date, days) {
+            const result = new Date(date);
+            result.setDate(result.getDate() + days);
+            return result;
+        }
+
         function getTodayStr() {
             return formatDate(new Date());
         }
 
+        function normalizeRecord(value) {
+            // 旧形式の記録を読み込むための互換処理。
+            if (value === 'taken') return { medication: 'taken', bleeding: false };
+            if (value === 'taken_bleed') return { medication: 'taken', bleeding: true };
+            if (value === 'resting') return { medication: 'resting', bleeding: false };
+            if (value && typeof value === 'object') {
+                const medication = ['taken', 'resting'].includes(value.medication)
+                    ? value.medication : null;
+                return { medication, bleeding: value.bleeding === true };
+            }
+            return { medication: null, bleeding: false };
+        }
+
+        function normalizeRecords(records) {
+            const normalized = {};
+            if (!records || typeof records !== 'object' || Array.isArray(records)) return normalized;
+            for (const [date, value] of Object.entries(records)) {
+                if (parseDate(date)) normalized[date] = normalizeRecord(value);
+            }
+            return normalized;
+        }
+
         function initDateInputs() {
-            const todayStr = getTodayStr();
-            const startInput = document.getElementById('startDate');
-            const endInput = document.getElementById('endDate');
-            if (startInput) startInput.value = todayStr;
-            if (endInput) endInput.value = todayStr;
+            const today = getTodayStr();
+            document.getElementById('startDate').value = today;
+            document.getElementById('endDate').value = today;
+        }
+
+        async function requestJson(url, options = {}) {
+            const response = await fetch(url, options);
+            const text = await response.text();
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            let data;
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch {
+                throw new Error('サーバー応答がJSONではありません。GAS側の応答形式を確認してください。');
+            }
+            return data;
         }
 
         async function syncFromSheet() {
             showLoading(true);
             try {
-                const response = await fetch(GAS_API_URL);
-                const data = await response.json();
-                if (data && data.records) {
-                    appData.records = data.records;
+                const data = await requestJson(GAS_API_URL);
+                if (!data || !data.records || typeof data.records !== 'object') {
+                    throw new Error('取得データに records がありません。');
                 }
-            } catch (err) {
-                console.error("スプレッドシート取得失敗:", err);
-            } finally {
+                appData.records = normalizeRecords(data.records);
                 updateUI();
+                return true;
+            } catch (err) {
+                console.error('スプレッドシート取得失敗:', err);
+                alert('記録を取得できませんでした。通信状態とGASの設定を確認してください。');
+                return false;
+            } finally {
                 showLoading(false);
             }
         }
 
-        async function saveToSheet(dateStr, status) {
-            showLoading(true);
-            try {
-                await fetch(GAS_API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain' },
-                    body: JSON.stringify({
+        function enqueueWrite(task) {
+            writeQueue = writeQueue.then(task, task);
+            return writeQueue;
+        }
+
+        async function sendWrite(payload) {
+            const result = await requestJson(GAS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+            if (result.success !== true && result.ok !== true) {
+                throw new Error(result.message || 'GAS側で保存成功を確認できませんでした。');
+            }
+            const synced = await syncFromSheet();
+            if (!synced) throw new Error('保存後の再取得に失敗しました。');
+        }
+
+        function saveToSheet(dateStr, record) {
+            return enqueueWrite(async () => {
+                showLoading(true);
+                try {
+                    await sendWrite({
                         action: 'saveRecord',
                         date: dateStr,
-                        status: status
-                    })
-                });
-                await syncFromSheet();
-            } catch (err) {
-                console.error("スプレッドシート保存失敗:", err);
-                showLoading(false);
-            }
+                        medication: record.medication,
+                        bleeding: record.bleeding
+                    });
+                } catch (err) {
+                    console.error('記録保存失敗:', err);
+                    alert('保存を確認できませんでした。画面を再読み込みする前に、記録が反映されているか確認してください。');
+                } finally {
+                    showLoading(false);
+                }
+            });
         }
 
-        async function saveBatchToSheet(recordsArray) {
-            showLoading(true);
-            try {
-                await fetch(GAS_API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain' },
-                    body: JSON.stringify({
-                        action: 'saveBatchRecords',
-                        recordsArray: recordsArray
-                    })
-                });
-                await syncFromSheet();
-            } catch (err) {
-                console.error("一括保存失敗:", err);
-                showLoading(false);
-            }
+        function saveBatchToSheet(recordsArray) {
+            return enqueueWrite(async () => {
+                showLoading(true);
+                try {
+                    await sendWrite({ action: 'saveBatchRecords', recordsArray });
+                } catch (err) {
+                    console.error('一括保存失敗:', err);
+                    alert('一括保存を確認できませんでした。スプレッドシートの内容を確認してください。');
+                } finally {
+                    showLoading(false);
+                }
+            });
         }
 
-        function getLatestTakenOrRestDate() {
-            const todayStr = getTodayStr();
-            const keys = Object.keys(appData.records).filter(k => k <= todayStr).sort();
-            if (keys.length === 0) return null;
-            return new Date(keys[keys.length - 1]);
+        function getLatestMedicationDate() {
+            const today = getTodayStr();
+            const keys = Object.keys(appData.records)
+                .filter(date => date <= today && appData.records[date]?.medication)
+                .sort();
+            return keys.length ? keys[keys.length - 1] : null;
         }
 
+        // 最新の「服薬/休薬記録日」から連続した服用記録を数える。
+        // 未入力日は服用済みと推定せず、連続記録をそこで止める。
         function calculateStreak() {
-            const latestDate = getLatestTakenOrRestDate();
-            if (!latestDate) return 0;
+            const latestStr = getLatestMedicationDate();
+            if (!latestStr || appData.records[latestStr].medication !== 'taken') return 0;
 
             let streak = 0;
-            let date = new Date(latestDate);
-
-            while (true) {
-                const dateStr = formatDate(date);
-                const status = appData.records[dateStr];
-
-                if (status === 'taken' || status === 'taken_bleed') {
-                    streak++;
-                    date.setDate(date.getDate() - 1);
-                } else {
-                    break;
-                }
+            let date = parseDate(latestStr);
+            while (date) {
+                const record = appData.records[formatDate(date)];
+                if (!record || record.medication !== 'taken') break;
+                streak++;
+                date = addDays(date, -1);
             }
             return streak;
         }
 
         function calculateBleedStreak() {
-            const latestDate = getLatestTakenOrRestDate();
-            if (!latestDate) return 0;
-
-            let bleedStreak = 0;
-            let date = new Date(latestDate);
-
-            while (true) {
-                const dateStr = formatDate(date);
-                const status = appData.records[dateStr];
-
-                if (status === 'taken_bleed') {
-                    bleedStreak++;
-                    date.setDate(date.getDate() - 1);
-                } else {
-                    break;
-                }
+            let count = 0;
+            let date = parseDate(getTodayStr());
+            while (date) {
+                const record = appData.records[formatDate(date)];
+                if (!record || record.bleeding !== true) break;
+                count++;
+                date = addDays(date, -1);
             }
-            return bleedStreak;
+            return count;
+        }
+
+        function isTodayRecordedAsTaken() {
+            return appData.records[getTodayStr()]?.medication === 'taken';
         }
 
         function check3DaysBleedRule() {
+            // アプリは処方判断を代行しない。記録条件を満たした場合のみ確認を表示する。
             const streak = calculateStreak();
             const bleedStreak = calculateBleedStreak();
+            if (!isTodayRecordedAsTaken()) return;
 
             if (streak >= 24 && bleedStreak >= 3) {
-                if (confirm('🩸 3日連続の出血が記録されました。\n24日以上連続服用中のため、今日から4日間の休薬を開始しますか？')) {
+                if (confirm('3日連続の出血と24日以上の連続服用記録があります。休薬の判断は処方医の指示・添付文書に従ってください。休薬記録を今日から4日間登録しますか？')) {
                     apply4DaysRest(new Date());
                 }
             } else if (bleedStreak >= 3 && streak < 24) {
-                alert('🩸 3日連続の出血を確認しました。\n※24日目未満の場合は、原則として24日目まで服用を継続します。（医師の指示に従ってください）');
+                alert('3日連続の出血が記録されています。服薬の継続・休薬は、処方医の指示に従ってください。');
             }
         }
 
         function applyBatchRecord(type) {
             const startVal = document.getElementById('startDate').value;
             const endVal = document.getElementById('endDate').value;
+            const start = parseDate(startVal);
+            const end = parseDate(endVal);
 
-            if (!startVal || !endVal) {
-                alert('開始日と終了日の両方を入力してください。');
+            if (!start || !end) {
+                alert('有効な開始日と終了日を入力してください。');
+                return;
+            }
+            if (startVal > endVal) {
+                alert('開始日は終了日以降にならないように指定してください。');
                 return;
             }
 
-            const start = new Date(startVal);
-            const end = new Date(endVal);
-
-            if (start > end) {
-                alert('開始日は終了日より前の日付を指定してください。');
+            const days = Math.round((end - start) / 86400000) + 1;
+            if (days > 366) {
+                alert('一度に更新できる期間は366日以内です。期間を分けて入力してください。');
                 return;
             }
 
             const batchArray = [];
-            let curr = new Date(start);
-            while (curr <= end) {
-                const dateStr = formatDate(curr);
-                batchArray.push({ date: dateStr, status: type });
-                curr.setDate(curr.getDate() + 1);
+            let current = new Date(start);
+            while (formatDate(current) <= endVal) {
+                const oldRecord = normalizeRecord(appData.records[formatDate(current)]);
+                let record;
+                if (type === 'taken') record = { medication: 'taken', bleeding: oldRecord.bleeding };
+                else if (type === 'taken_bleed') record = { medication: 'taken', bleeding: true };
+                else if (type === 'resting') record = { medication: 'resting', bleeding: oldRecord.bleeding };
+                else record = { medication: null, bleeding: false };
+
+                batchArray.push({ date: formatDate(current), medication: record.medication, bleeding: record.bleeding });
+                current = addDays(current, 1);
             }
 
+            const actionName = type === null ? 'クリア' : '更新';
+            if (!confirm(`${startVal}〜${endVal} の ${days} 日分を${actionName}します。よろしいですか？`)) return;
             saveBatchToSheet(batchArray);
         }
 
         function toggleTodayTake() {
             const today = getTodayStr();
-            const current = appData.records[today];
-            const nextStatus = (current === 'taken' || current === 'taken_bleed') ? null : 'taken';
-            saveToSheet(today, nextStatus);
+            const current = normalizeRecord(appData.records[today]);
+            const nextMedication = current.medication === 'taken' ? null : 'taken';
+            saveToSheet(today, { medication: nextMedication, bleeding: current.bleeding });
         }
 
         async function toggleTodayBleed() {
             const today = getTodayStr();
-            const current = appData.records[today];
-            let nextStatus = 'taken_bleed';
-
-            if (current === 'taken') {
-                nextStatus = 'taken_bleed';
-            } else if (current === 'taken_bleed') {
-                nextStatus = 'taken';
-            }
-            
-            await saveToSheet(today, nextStatus);
+            const current = normalizeRecord(appData.records[today]);
+            await saveToSheet(today, { medication: current.medication, bleeding: !current.bleeding });
             check3DaysBleedRule();
         }
 
         function handleStartResting() {
             const streak = calculateStreak();
-            if (streak < 24) {
-                alert('原則として24日目までは出血があっても服用を継続します。（医師の指示に従ってください）');
+            if (streak < 24 && !confirm('24日以上の連続服用記録が確認できません。処方医の指示に従っていることを確認してください。それでも休薬記録を登録しますか？')) {
+                return;
             }
-            if (confirm('今日から4日間の休薬を開始しますか？')) {
+            if (confirm('今日から4日間を休薬として記録しますか？実際の服薬判断は処方医の指示に従ってください。')) {
                 apply4DaysRest(new Date());
             }
         }
@@ -540,30 +613,46 @@
         function apply4DaysRest(startDate) {
             const batchArray = [];
             let date = new Date(startDate);
+            date.setHours(12, 0, 0, 0);
             for (let i = 0; i < 4; i++) {
                 const dateStr = formatDate(date);
-                batchArray.push({ date: dateStr, status: 'resting' });
-                date.setDate(date.getDate() + 1);
+                const current = normalizeRecord(appData.records[dateStr]);
+                batchArray.push({
+                    date: dateStr,
+                    medication: 'resting',
+                    bleeding: current.bleeding
+                });
+                date = addDays(date, 1);
             }
             saveBatchToSheet(batchArray);
         }
 
         function handleCellClick(dateStr) {
-            const states = [null, 'taken', 'taken_bleed', 'resting'];
-            const current = appData.records[dateStr] || null;
-            const nextIndex = (states.indexOf(current) + 1) % states.length;
-            const nextState = states[nextIndex];
-
-            saveToSheet(dateStr, nextState);
+            const current = normalizeRecord(appData.records[dateStr]);
+            const states = [
+                { medication: null, bleeding: false },
+                { medication: 'taken', bleeding: false },
+                { medication: 'taken', bleeding: true },
+                { medication: 'resting', bleeding: false }
+            ];
+            const key = value => `${value.medication || 'none'}:${value.bleeding}`;
+            const index = states.findIndex(state => key(state) === key(current));
+            const next = states[(index + 1) % states.length];
+            saveToSheet(dateStr, next);
         }
 
         function changeMonth(diff) {
-            currentViewDate.setMonth(currentViewDate.getMonth() + diff);
+            currentViewDate = new Date(
+                currentViewDate.getFullYear(),
+                currentViewDate.getMonth() + diff,
+                1
+            );
             renderCalendar();
         }
 
         function updateUI() {
             const today = getTodayStr();
+            const todayRecord = normalizeRecord(appData.records[today]);
             const takeBtn = document.getElementById('takeBtn');
             const bleedBtn = document.getElementById('bleedBtn');
             const restBtn = document.getElementById('restBtn');
@@ -571,83 +660,63 @@
             const dayCountDisplay = document.getElementById('dayCountDisplay');
             const subInfoDisplay = document.getElementById('subInfoDisplay');
 
-            const latestDate = getLatestTakenOrRestDate();
-            const latestStr = latestDate ? formatDate(latestDate) : today;
-            const latestStatus = appData.records[latestStr];
-
-            const isTakenToday = appData.records[today] === 'taken' || appData.records[today] === 'taken_bleed';
-            const isBleedToday = appData.records[today] === 'taken_bleed';
-
-            const currentStreak = calculateStreak();
+            const streak = calculateStreak();
             const bleedStreak = calculateBleedStreak();
 
-            if (latestStatus === 'resting') {
-                appData.mode = 'resting';
-            } else {
-                appData.mode = 'taking';
-            }
-
-            if (appData.mode === 'taking') {
-                if (statusBadge) {
-                    statusBadge.textContent = '服用期';
+            if (statusBadge) {
+                if (todayRecord.medication === 'resting') {
+                    statusBadge.textContent = '休薬として記録済み';
+                    statusBadge.className = 'status-badge badge-resting';
+                } else if (todayRecord.medication === 'taken') {
+                    statusBadge.textContent = '服用として記録済み';
+                    statusBadge.className = 'status-badge badge-taking';
+                } else {
+                    statusBadge.textContent = '今日の服薬記録未入力';
                     statusBadge.className = 'status-badge badge-taking';
                 }
-                if (dayCountDisplay) {
-                    dayCountDisplay.innerHTML = `${currentStreak} <span>日目</span>`;
-                }
-
-                if (takeBtn) {
-                    takeBtn.textContent = isTakenToday ? '✓ 本日の服薬完了' : '💊 今日の服薬を記録する';
-                    takeBtn.className = isTakenToday ? 'btn btn-take done' : 'btn btn-take';
-                }
-
-                if (bleedBtn) {
-                    bleedBtn.textContent = isBleedToday ? '🩸 今日の出血を記録済み' : '🩸 今日の出血を記録する';
-                    bleedBtn.className = isBleedToday ? 'btn btn-bleed done' : 'btn btn-bleed';
-                }
-
-                if (restBtn) {
-                    restBtn.style.display = (isBleedToday || currentStreak >= 24) ? 'block' : 'none';
-                }
-
-                if (subInfoDisplay) {
-                    if (currentStreak >= 120) {
-                        subInfoDisplay.textContent = '120日達成！明日から4日間の休薬に入りましょう。';
-                    } else if (currentStreak >= 24 && bleedStreak >= 3) {
-                        subInfoDisplay.textContent = '🩸 3日連続の出血を確認しました。4日間の休薬をおすすめします。';
-                    } else if (currentStreak >= 24) {
-                        subInfoDisplay.textContent = '24日経過しました。出血があれば4日間休薬可能です。';
-                    } else {
-                        subInfoDisplay.textContent = `最低連続服用の24日まであと ${Math.max(0, 24 - currentStreak)} 日`;
-                    }
-                }
-
-            } else {
-                if (statusBadge) {
-                    statusBadge.textContent = '休薬期（4日間）';
-                    statusBadge.className = 'status-badge badge-resting';
-                }
-
-                if (dayCountDisplay) {
-                    dayCountDisplay.innerHTML = `休薬中`;
-                }
-                if (takeBtn) {
-                    takeBtn.textContent = '💊 服用を再開する（服用期へ）';
-                    takeBtn.className = 'btn btn-take';
-                }
-                if (bleedBtn) {
-                    bleedBtn.textContent = '🩸 今日の出血を記録する';
-                    bleedBtn.className = isBleedToday ? 'btn btn-bleed done' : 'btn btn-bleed';
-                }
-                if (restBtn) {
-                    restBtn.style.display = 'none';
-                }
-
-                if (subInfoDisplay) {
-                    subInfoDisplay.textContent = '4日間の休薬が終わったら翌日から服用を再開してください。';
-                }
             }
 
+            if (dayCountDisplay) dayCountDisplay.innerHTML = `${streak} <span>日分の連続服用記録</span>`;
+
+            if (takeBtn) {
+                takeBtn.textContent = todayRecord.medication === 'taken'
+                    ? '✓ 本日の服薬記録を解除'
+                    : todayRecord.medication === 'resting'
+                        ? '💊 今日の服用を記録する'
+                        : '💊 今日の服薬を記録する';
+                takeBtn.className = todayRecord.medication === 'taken' ? 'btn btn-take done' : 'btn btn-take';
+            }
+
+            if (bleedBtn) {
+                bleedBtn.textContent = todayRecord.bleeding
+                    ? '✓ 今日の出血記録を解除'
+                    : '🩸 今日の出血を記録する';
+                bleedBtn.className = todayRecord.bleeding ? 'btn btn-bleed done' : 'btn btn-bleed';
+            }
+
+            if (restBtn) {
+                restBtn.style.display = (streak >= 24 || todayRecord.bleeding) ? 'block' : 'none';
+            }
+
+            if (subInfoDisplay) {
+                const latestDate = getLatestMedicationDate();
+                const latestIsToday = latestDate === today;
+                if (todayRecord.medication === 'resting') {
+                    subInfoDisplay.textContent = '休薬として記録されています。再開時期は処方医の指示に従ってください。';
+                } else if (!latestIsToday && latestDate) {
+                    subInfoDisplay.textContent = `最終の服薬記録は ${latestDate} です。今日の服薬状況を確認してください。`;
+                } else if (streak >= 120) {
+                    subInfoDisplay.textContent = '120日分の連続服用記録があります。今後の服用について処方医の指示を確認してください。';
+                } else if (streak >= 24 && bleedStreak >= 3) {
+                    subInfoDisplay.textContent = '24日以上の連続服用記録と3日連続の出血記録があります。処方医の指示を確認してください。';
+                } else if (streak >= 24) {
+                    subInfoDisplay.textContent = '24日以上の連続服用記録があります。出血時の対応は処方医の指示に従ってください。';
+                } else if (todayRecord.medication === 'taken') {
+                    subInfoDisplay.textContent = `24日分の連続服用記録まで、あと ${Math.max(0, 24 - streak)} 日分です。`;
+                } else {
+                    subInfoDisplay.textContent = '服薬状況は記録から自動推定せず、実際の状況を記録してください。';
+                }
+            }
             renderCalendar();
         }
 
@@ -658,70 +727,64 @@
 
             const year = currentViewDate.getFullYear();
             const month = currentViewDate.getMonth();
-
             const monthLabel = document.getElementById('calendarMonthLabel');
             if (monthLabel) monthLabel.textContent = `${year}年${month + 1}月`;
 
-            const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-            weekdays.forEach(w => {
+            ['日', '月', '火', '水', '木', '金', '土'].forEach(day => {
                 const el = document.createElement('div');
                 el.className = 'weekday';
-                el.textContent = w;
+                el.textContent = day;
                 grid.appendChild(el);
             });
 
             const firstDay = new Date(year, month, 1).getDay();
             const lastDate = new Date(year, month + 1, 0).getDate();
-
-            for (let i = 0; i < firstDay; i++) {
-                grid.appendChild(document.createElement('div'));
-            }
+            for (let i = 0; i < firstDay; i++) grid.appendChild(document.createElement('div'));
 
             let target120DateStr = null;
-            const latestDate = getLatestTakenOrRestDate();
-            const currentStreak = calculateStreak();
-            if (appData.mode === 'taking' && currentStreak > 0 && latestDate) {
-                const targetDate = new Date(latestDate);
-                targetDate.setDate(targetDate.getDate() + (120 - currentStreak));
+            const latestDateStr = getLatestMedicationDate();
+            const streak = calculateStreak();
+            if (latestDateStr && streak > 0 && appData.records[latestDateStr]?.medication === 'taken') {
+                const targetDate = addDays(parseDate(latestDateStr), 120 - streak);
                 if (targetDate.getMonth() === month && targetDate.getFullYear() === year) {
                     target120DateStr = formatDate(targetDate);
                 }
             }
 
-            const todayStr = getTodayStr();
+            const today = getTodayStr();
             for (let d = 1; d <= lastDate; d++) {
-                const cellDate = new Date(year, month, d);
-                const dateStr = formatDate(cellDate);
-
-                const cell = document.createElement('div');
+                const date = new Date(year, month, d, 12, 0, 0, 0);
+                const dateStr = formatDate(date);
+                const record = normalizeRecord(appData.records[dateStr]);
+                const cell = document.createElement('button');
+                cell.type = 'button';
                 cell.className = 'day-cell';
                 cell.textContent = d;
+                cell.setAttribute('aria-label', `${dateStr}、${record.medication === 'taken' ? '服用記録あり' : record.medication === 'resting' ? '休薬記録あり' : '服薬記録なし'}、${record.bleeding ? '出血記録あり' : '出血記録なし'}`);
 
-                const status = appData.records[dateStr];
-
-                if (dateStr === todayStr) cell.classList.add('today');
-                if (status === 'taken') cell.classList.add('taken');
-                if (status === 'taken_bleed') cell.classList.add('taken_bleed');
-                if (status === 'resting') cell.classList.add('resting');
+                if (dateStr === today) cell.classList.add('today');
+                if (record.medication === 'taken' && record.bleeding) cell.classList.add('taken_bleed');
+                else if (record.medication === 'taken') cell.classList.add('taken');
+                else if (record.medication === 'resting') cell.classList.add('resting');
+                else if (record.bleeding) cell.classList.add('bleeding-only');
                 if (dateStr === target120DateStr) cell.classList.add('predicted-120');
 
-                cell.onclick = () => handleCellClick(dateStr);
+                cell.addEventListener('click', () => handleCellClick(dateStr));
                 grid.appendChild(cell);
             }
         }
 
-        // 初期化：即座にUI・カレンダーを描画し、並行してバックグラウンド通信でデータを更新
         function initApp() {
             initDateInputs();
             updateUI();
-
+            // LIFFの初期化はLINE内表示のために行う。APIの認証を保証するものではない。
             if (typeof liff !== 'undefined' && LIFF_ID) {
-                liff.init({ liffId: LIFF_ID }).then(() => {
-                    syncFromSheet();
-                }).catch(err => {
-                    console.error("LIFF Init error:", err);
-                    syncFromSheet();
-                });
+                liff.init({ liffId: LIFF_ID })
+                    .then(() => syncFromSheet())
+                    .catch(err => {
+                        console.error('LIFF初期化失敗:', err);
+                        syncFromSheet();
+                    });
             } else {
                 syncFromSheet();
             }

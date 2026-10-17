@@ -332,80 +332,81 @@
         // ★★★ LIFF ID ★★★
         const LIFF_ID = '2012058647-cxs5YpF6';
 
-        let appData = {
-            records: {},
-            mode: 'taking',
-            restStartDay: null
-        };
+let appData = {
+        records: {},
+        mode: 'taking',
+        restStartDay: null
+    };
 
-        let currentViewDate = new Date();
+    let currentViewDate = new Date();
 
-        function showLoading(show) {
-            document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
-        }
+    function showLoading(show) {
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) overlay.style.display = show ? 'flex' : 'none';
+    }
 
-        // スプレッドシート（DB）から最新データを取得
-        async function syncFromSheet() {
-            showLoading(true);
-            try {
-                const response = await fetch(GAS_API_URL);
-                const data = await response.json();
-                if (data && data.records) {
-                    appData.records = data.records;
-                    updateUI();
-                }
-            } catch (err) {
-                console.error("スプレッドシート取得失敗:", err);
-            } finally {
-                showLoading(false);
+    // 1. スプレッドシート（DB）から最新データを取得
+    async function syncFromSheet() {
+        showLoading(true);
+        try {
+            const response = await fetch(GAS_API_URL);
+            const data = await response.json();
+            if (data && data.records) {
+                appData.records = data.records;
+                updateUI();
             }
+        } catch (err) {
+            console.error("スプレッドシート取得失敗:", err);
+        } finally {
+            showLoading(false);
         }
+    }
 
-        // 単一レコードをスプレッドシートへ送信
-        async function saveToSheet(dateStr, status) {
-            showLoading(true);
-            try {
-                await fetch(GAS_API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'saveRecord',
-                        date: dateStr,
-                        status: status
-                    })
-                });
-                await syncFromSheet(); // スプレッドシートから再読み込みして確定
-            } catch (err) {
-                console.error("スプレッドシート保存失敗:", err);
-                showLoading(false);
-            }
+    // 2. 単一レコードをスプレッドシートへ送信（保存/更新/削除）
+    async function saveToSheet(dateStr, status) {
+        showLoading(true);
+        try {
+            await fetch(GAS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' }, // GASへのPOSTのCORS回避設定
+                body: JSON.stringify({
+                    action: 'saveRecord',
+                    date: dateStr,
+                    status: status
+                })
+            });
+            await syncFromSheet(); // 送信後に最新DB状態を再取得して画面反映
+        } catch (err) {
+            console.error("スプレッドシート保存失敗:", err);
+            showLoading(false);
         }
+    }
 
-        // 複数レコードを一括でスプレッドシートへ送信
-        async function saveBatchToSheet(recordsArray) {
-            showLoading(true);
-            try {
-                await fetch(GAS_API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'saveBatchRecords',
-                        recordsArray: recordsArray
-                    })
-                });
-                await syncFromSheet();
-            } catch (err) {
-                console.error("一括保存失敗:", err);
-                showLoading(false);
-            }
+    // 3. 複数レコードを一括でスプレッドシートへ送信（期間指定セット/クリア用）
+    async function saveBatchToSheet(recordsArray) {
+        showLoading(true);
+        try {
+            await fetch(GAS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({
+                    action: 'saveBatchRecords',
+                    recordsArray: recordsArray
+                })
+            });
+            await syncFromSheet();
+        } catch (err) {
+            console.error("一括保存失敗:", err);
+            showLoading(false);
         }
+    }
 
-        function formatDate(date) {
-            const y = date.getFullYear();
-            const m = String(date.getMonth() + 1).padStart(2, '0');
-            const d = String(date.getDate()).padStart(2, '0');
-            return `${y}-${m}-${d}`;
-        }
+    function formatDate(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
 
         function getTodayStr() {
             return formatDate(new Date());

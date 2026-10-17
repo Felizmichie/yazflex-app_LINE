@@ -347,3 +347,391 @@
             const y = date.getFullYear();
             const m = String(date.getMonth() + 1).padStart(2, '0');
             const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function getTodayStr() {
+            return formatDate(new Date());
+        }
+
+        function initDateInputs() {
+            const todayStr = getTodayStr();
+            const startInput = document.getElementById('startDate');
+            const endInput = document.getElementById('endDate');
+            if (startInput) startInput.value = todayStr;
+            if (endInput) endInput.value = todayStr;
+        }
+
+        async function syncFromSheet() {
+            showLoading(true);
+            try {
+                const response = await fetch(GAS_API_URL);
+                const data = await response.json();
+                if (data && data.records) {
+                    appData.records = data.records;
+                }
+            } catch (err) {
+                console.error("スプレッドシート取得失敗:", err);
+            } finally {
+                updateUI();
+                showLoading(false);
+            }
+        }
+
+        async function saveToSheet(dateStr, status) {
+            showLoading(true);
+            try {
+                await fetch(GAS_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify({
+                        action: 'saveRecord',
+                        date: dateStr,
+                        status: status
+                    })
+                });
+                await syncFromSheet();
+            } catch (err) {
+                console.error("スプレッドシート保存失敗:", err);
+                showLoading(false);
+            }
+        }
+
+        async function saveBatchToSheet(recordsArray) {
+            showLoading(true);
+            try {
+                await fetch(GAS_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify({
+                        action: 'saveBatchRecords',
+                        recordsArray: recordsArray
+                    })
+                });
+                await syncFromSheet();
+            } catch (err) {
+                console.error("一括保存失敗:", err);
+                showLoading(false);
+            }
+        }
+
+        function getLatestTakenOrRestDate() {
+            const todayStr = getTodayStr();
+            const keys = Object.keys(appData.records).filter(k => k <= todayStr).sort();
+            if (keys.length === 0) return null;
+            return new Date(keys[keys.length - 1]);
+        }
+
+        function calculateStreak() {
+            const latestDate = getLatestTakenOrRestDate();
+            if (!latestDate) return 0;
+
+            let streak = 0;
+            let date = new Date(latestDate);
+
+            while (true) {
+                const dateStr = formatDate(date);
+                const status = appData.records[dateStr];
+
+                if (status === 'taken' || status === 'taken_bleed') {
+                    streak++;
+                    date.setDate(date.getDate() - 1);
+                } else {
+                    break;
+                }
+            }
+            return streak;
+        }
+
+        function calculateBleedStreak() {
+            const latestDate = getLatestTakenOrRestDate();
+            if (!latestDate) return 0;
+
+            let bleedStreak = 0;
+            let date = new Date(latestDate);
+
+            while (true) {
+                const dateStr = formatDate(date);
+                const status = appData.records[dateStr];
+
+                if (status === 'taken_bleed') {
+                    bleedStreak++;
+                    date.setDate(date.getDate() - 1);
+                } else {
+                    break;
+                }
+            }
+            return bleedStreak;
+        }
+
+        function check3DaysBleedRule() {
+            const streak = calculateStreak();
+            const bleedStreak = calculateBleedStreak();
+
+            if (streak >= 24 && bleedStreak >= 3) {
+                if (confirm('🩸 3日連続の出血が記録されました。\n24日以上連続服用中のため、今日から4日間の休薬を開始しますか？')) {
+                    apply4DaysRest(new Date());
+                }
+            } else if (bleedStreak >= 3 && streak < 24) {
+                alert('🩸 3日連続の出血を確認しました。\n※24日目未満の場合は、原則として24日目まで服用を継続します。（医師の指示に従ってください）');
+            }
+        }
+
+        function applyBatchRecord(type) {
+            const startVal = document.getElementById('startDate').value;
+            const endVal = document.getElementById('endDate').value;
+
+            if (!startVal || !endVal) {
+                alert('開始日と終了日の両方を入力してください。');
+                return;
+            }
+
+            const start = new Date(startVal);
+            const end = new Date(endVal);
+
+            if (start > end) {
+                alert('開始日は終了日より前の日付を指定してください。');
+                return;
+            }
+
+            const batchArray = [];
+            let curr = new Date(start);
+            while (curr <= end) {
+                const dateStr = formatDate(curr);
+                batchArray.push({ date: dateStr, status: type });
+                curr.setDate(curr.getDate() + 1);
+            }
+
+            saveBatchToSheet(batchArray);
+        }
+
+        function toggleTodayTake() {
+            const today = getTodayStr();
+            const current = appData.records[today];
+            const nextStatus = (current === 'taken' || current === 'taken_bleed') ? null : 'taken';
+            saveToSheet(today, nextStatus);
+        }
+
+        async function toggleTodayBleed() {
+            const today = getTodayStr();
+            const current = appData.records[today];
+            let nextStatus = 'taken_bleed';
+
+            if (current === 'taken') {
+                nextStatus = 'taken_bleed';
+            } else if (current === 'taken_bleed') {
+                nextStatus = 'taken';
+            }
+            
+            await saveToSheet(today, nextStatus);
+            check3DaysBleedRule();
+        }
+
+        function handleStartResting() {
+            const streak = calculateStreak();
+            if (streak < 24) {
+                alert('原則として24日目までは出血があっても服用を継続します。（医師の指示に従ってください）');
+            }
+            if (confirm('今日から4日間の休薬を開始しますか？')) {
+                apply4DaysRest(new Date());
+            }
+        }
+
+        function apply4DaysRest(startDate) {
+            const batchArray = [];
+            let date = new Date(startDate);
+            for (let i = 0; i < 4; i++) {
+                const dateStr = formatDate(date);
+                batchArray.push({ date: dateStr, status: 'resting' });
+                date.setDate(date.getDate() + 1);
+            }
+            saveBatchToSheet(batchArray);
+        }
+
+        function handleCellClick(dateStr) {
+            const states = [null, 'taken', 'taken_bleed', 'resting'];
+            const current = appData.records[dateStr] || null;
+            const nextIndex = (states.indexOf(current) + 1) % states.length;
+            const nextState = states[nextIndex];
+
+            saveToSheet(dateStr, nextState);
+        }
+
+        function changeMonth(diff) {
+            currentViewDate.setMonth(currentViewDate.getMonth() + diff);
+            renderCalendar();
+        }
+
+        function updateUI() {
+            const today = getTodayStr();
+            const takeBtn = document.getElementById('takeBtn');
+            const bleedBtn = document.getElementById('bleedBtn');
+            const restBtn = document.getElementById('restBtn');
+            const statusBadge = document.getElementById('statusBadge');
+            const dayCountDisplay = document.getElementById('dayCountDisplay');
+            const subInfoDisplay = document.getElementById('subInfoDisplay');
+
+            const latestDate = getLatestTakenOrRestDate();
+            const latestStr = latestDate ? formatDate(latestDate) : today;
+            const latestStatus = appData.records[latestStr];
+
+            const isTakenToday = appData.records[today] === 'taken' || appData.records[today] === 'taken_bleed';
+            const isBleedToday = appData.records[today] === 'taken_bleed';
+
+            const currentStreak = calculateStreak();
+            const bleedStreak = calculateBleedStreak();
+
+            if (latestStatus === 'resting') {
+                appData.mode = 'resting';
+            } else {
+                appData.mode = 'taking';
+            }
+
+            if (appData.mode === 'taking') {
+                if (statusBadge) {
+                    statusBadge.textContent = '服用期';
+                    statusBadge.className = 'status-badge badge-taking';
+                }
+                if (dayCountDisplay) {
+                    dayCountDisplay.innerHTML = `${currentStreak} <span>日目</span>`;
+                }
+
+                if (takeBtn) {
+                    takeBtn.textContent = isTakenToday ? '✓ 本日の服薬完了' : '💊 今日の服薬を記録する';
+                    takeBtn.className = isTakenToday ? 'btn btn-take done' : 'btn btn-take';
+                }
+
+                if (bleedBtn) {
+                    bleedBtn.textContent = isBleedToday ? '🩸 今日の出血を記録済み' : '🩸 今日の出血を記録する';
+                    bleedBtn.className = isBleedToday ? 'btn btn-bleed done' : 'btn btn-bleed';
+                }
+
+                if (restBtn) {
+                    restBtn.style.display = (isBleedToday || currentStreak >= 24) ? 'block' : 'none';
+                }
+
+                if (subInfoDisplay) {
+                    if (currentStreak >= 120) {
+                        subInfoDisplay.textContent = '120日達成！明日から4日間の休薬に入りましょう。';
+                    } else if (currentStreak >= 24 && bleedStreak >= 3) {
+                        subInfoDisplay.textContent = '🩸 3日連続の出血を確認しました。4日間の休薬をおすすめします。';
+                    } else if (currentStreak >= 24) {
+                        subInfoDisplay.textContent = '24日経過しました。出血があれば4日間休薬可能です。';
+                    } else {
+                        subInfoDisplay.textContent = `最低連続服用の24日まであと ${Math.max(0, 24 - currentStreak)} 日`;
+                    }
+                }
+
+            } else {
+                if (statusBadge) {
+                    statusBadge.textContent = '休薬期（4日間）';
+                    statusBadge.className = 'status-badge badge-resting';
+                }
+
+                if (dayCountDisplay) {
+                    dayCountDisplay.innerHTML = `休薬中`;
+                }
+                if (takeBtn) {
+                    takeBtn.textContent = '💊 服用を再開する（服用期へ）';
+                    takeBtn.className = 'btn btn-take';
+                }
+                if (bleedBtn) {
+                    bleedBtn.textContent = '🩸 今日の出血を記録する';
+                    bleedBtn.className = isBleedToday ? 'btn btn-bleed done' : 'btn btn-bleed';
+                }
+                if (restBtn) {
+                    restBtn.style.display = 'none';
+                }
+
+                if (subInfoDisplay) {
+                    subInfoDisplay.textContent = '4日間の休薬が終わったら翌日から服用を再開してください。';
+                }
+            }
+
+            renderCalendar();
+        }
+
+        function renderCalendar() {
+            const grid = document.getElementById('calendarGrid');
+            if (!grid) return;
+            grid.innerHTML = '';
+
+            const year = currentViewDate.getFullYear();
+            const month = currentViewDate.getMonth();
+
+            const monthLabel = document.getElementById('calendarMonthLabel');
+            if (monthLabel) monthLabel.textContent = `${year}年${month + 1}月`;
+
+            const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+            weekdays.forEach(w => {
+                const el = document.createElement('div');
+                el.className = 'weekday';
+                el.textContent = w;
+                grid.appendChild(el);
+            });
+
+            const firstDay = new Date(year, month, 1).getDay();
+            const lastDate = new Date(year, month + 1, 0).getDate();
+
+            for (let i = 0; i < firstDay; i++) {
+                grid.appendChild(document.createElement('div'));
+            }
+
+            let target120DateStr = null;
+            const latestDate = getLatestTakenOrRestDate();
+            const currentStreak = calculateStreak();
+            if (appData.mode === 'taking' && currentStreak > 0 && latestDate) {
+                const targetDate = new Date(latestDate);
+                targetDate.setDate(targetDate.getDate() + (120 - currentStreak));
+                if (targetDate.getMonth() === month && targetDate.getFullYear() === year) {
+                    target120DateStr = formatDate(targetDate);
+                }
+            }
+
+            const todayStr = getTodayStr();
+            for (let d = 1; d <= lastDate; d++) {
+                const cellDate = new Date(year, month, d);
+                const dateStr = formatDate(cellDate);
+
+                const cell = document.createElement('div');
+                cell.className = 'day-cell';
+                cell.textContent = d;
+
+                const status = appData.records[dateStr];
+
+                if (dateStr === todayStr) cell.classList.add('today');
+                if (status === 'taken') cell.classList.add('taken');
+                if (status === 'taken_bleed') cell.classList.add('taken_bleed');
+                if (status === 'resting') cell.classList.add('resting');
+                if (dateStr === target120DateStr) cell.classList.add('predicted-120');
+
+                cell.onclick = () => handleCellClick(dateStr);
+                grid.appendChild(cell);
+            }
+        }
+
+        // 初期化：即座にUI・カレンダーを描画し、並行してバックグラウンド通信でデータを更新
+        function initApp() {
+            initDateInputs();
+            updateUI();
+
+            if (typeof liff !== 'undefined' && LIFF_ID) {
+                liff.init({ liffId: LIFF_ID }).then(() => {
+                    syncFromSheet();
+                }).catch(err => {
+                    console.error("LIFF Init error:", err);
+                    syncFromSheet();
+                });
+            } else {
+                syncFromSheet();
+            }
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initApp);
+        } else {
+            initApp();
+        }
+    </script>
+</body>
+</html>

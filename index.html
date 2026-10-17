@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ヤーズフレックス管理</title>
+    
+    <!-- PWA Settings -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="YazFlex">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/color/180/pill.png">
+
+    <style>
+        :root {
+            --primary-color: #ff6b81;
+            --primary-light: #fff0f3;
+            --bleed-color: #e84118;
+            --rest-color: #ffa502;
+            --bg-color: #f7f9fb;
+            --card-bg: #ffffff;
+            --text-main: #2f3542;
+            --text-sub: #747d8c;
+            --border-radius: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 20px 16px 40px 16px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-top: 10px;
+        }
+
+        header h1 {
+            font-size: 1.2rem;
+            color: var(--text-sub);
+            font-weight: 600;
+        }
+
+        /* Status Card */
+        .status-card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 24px 20px;
+            text-align: center;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.04);
+            margin-bottom: 20px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin-bottom: 12px;
+        }
+
+        .badge-taking { background: var(--primary-light); color: var(--primary-color); }
+        .badge-resting { background: #ffeaa7; color: #d35400; }
+
+        .day-count {
+            font-size: 2.8rem;
+            font-weight: 800;
+            color: var(--text-main);
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+
+        .day-count span {
+            font-size: 1.2rem;
+            font-weight: normal;
+            color: var(--text-sub);
+        }
+
+        .sub-info {
+            font-size: 0.9rem;
+            color: var(--text-sub);
+            margin-top: 8px;
+            min-height: 1.2em;
+        }
+
+        /* Action Buttons */
+        .action-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: var(--border-radius);
+            font-size: 1.05rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-take {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-take.done {
+            background: #2ed573;
+        }
+
+        .btn-bleed {
+            background: #ffffff;
+            color: var(--bleed-color);
+            border: 2px solid var(--bleed-color);
+        }
+
+        .btn-bleed.done {
+            background: #ffeae6;
+        }
+
+        .btn-start-rest {
+            background: var(--rest-color);
+            color: white;
+        }
+
+        .btn-reset {
+            background: transparent;
+            color: var(--text-sub);
+            font-size: 0.85rem;
+            box-shadow: none;
+            padding: 8px;
+            margin-top: 4px;
+        }
+
+        /* Notification Card */
+        .notify-card {
+            background: #eef5ff;
+            border: 1px solid #70a1ff;
+            border-radius: var(--border-radius);
+            padding: 16px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .notify-text {
+            font-size: 0.85rem;
+            color: #2f3542;
+        }
+
+        .notify-btn {
+            background: #1e90ff;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        /* Cards Style */
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 18px 20px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.04);
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: var(--text-main);
+        }
+
+        .date-inputs {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .date-inputs input[type="date"] {
+            flex: 1;
+            padding: 10px 8px;
+            border: 1px solid #dcdde1;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: var(--text-main);
+            background: #f8f9fa;
+        }
+
+        .date-inputs span {
+            font-size: 0.85rem;
+            color: var(--text-sub);
+        }
+
+        .range-buttons, .backup-buttons {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .btn-sm {
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .btn-sm-take { background: var(--primary-light); color: var(--primary-color); }
+        .btn-sm-bleed { background: #ffeae6; color: var(--bleed-color); }
+        .btn-sm-rest { background: #ffeaa7; color: #d35400; }
+        .btn-sm-clear { background: #f1f2f6; color: var(--text-sub); }
+        .btn-sm-backup { background: #e3f2fd; color: #1976d2; }
+        .btn-sm-restore { background: #e8f5e9; color: #388e3c; }
+
+        /* Calendar View */
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .calendar-header h2 {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .nav-btn {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 4px 8px;
+            color: var(--text-sub);
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+            text-align: center;
+        }
+
+        .weekday {
+            font-size: 0.75rem;
+            color: var(--text-sub);
+            font-weight: 600;
+            padding-bottom: 4px;
+        }
+
+        .day-cell {
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            border-radius: 50%;
+            position: relative;
+            cursor: pointer;
+            border: 1px solid transparent;
+            user-select: none;
+        }
+
+        .day-cell.today {
+            border-color: var(--text-main);
+            font-weight: bold;
+        }
+
+        .day-cell.taken {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .day-cell.taken_bleed {
+            background: linear-gradient(135deg, var(--primary-color) 50%, var(--bleed-color) 50%);
+            color: white;
+        }
+
+        .day-cell.resting {
+            background-color: var(--rest-color);
+            color: white;
+        }
+
+        .day-cell.predicted-120 {
+            background-color: var(--primary-light);
+            color: var(--primary-color);
+            border: 1px dashed var(--primary-color);
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 16px;
+            font-size: 0.75rem;
+            color: var(--text-sub);
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .guide-text {
+            font-size: 0.8rem;
+            color: var(--text-sub);
+            text-align: center;
+            margin-top: 12px;
+        }
+    </style>
+    <!-- LIFF SDK -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>ヤーズフレックス 服薬ノート</h1>
+    </header>
+
+    <!-- 通知案内カード -->
+    <div class="notify-card" id="notifyCard">
+        <div class="notify-text">
+            ⏰ <b>夜23時の未服薬リマインダー</b><br>
+            23時に未服薬の場合に通知を送ります
+        </div>
+        <button class="notify-btn" onclick="requestNotificationPermission()">許可する</button>
+    </div>
+
+    <!-- メインステータス -->
+    <div class="status-card">
+        <div id="statusBadge" class="status-badge badge-taking">服用期</div>
+        <div class="day-count" id="dayCountDisplay">0 <span>日目</span></div>
+        <div class="sub-info" id="subInfoDisplay">今日も忘れずに服用しましょう</div>
+    </div>
+
+    <!-- アクションボタン -->
+    <div class="action-group">
+        <button id="takeBtn" class="btn btn-take" onclick="toggleTodayTake()">
+            💊 今日の服薬を記録する
+        </button>
+        <button id="bleedBtn" class="btn btn-bleed" onclick="toggleTodayBleed()">
+            🩸 今日の出血を記録する
+        </button>
+        <button id="restBtn" class="btn btn-start-rest" onclick="handleStartResting()" style="display: none;">
+            ⚠️ 4日間の休薬を開始する
+        </button>
+    </div>
+
+    <!-- 期間一括入力フォーム -->
+    <div class="card">
+        <h2>📅 期間指定でまとめて入力</h2>
+        <div class="date-inputs">
+            <input type="date" id="startDate">
+            <span>〜</span>
+            <input type="date" id="endDate">
+        </div>
+        <div class="range-buttons">
+            <button class="btn-sm btn-sm-take" onclick="applyBatchRecord('taken')">💊 服用をセット</button>
+            <button class="btn-sm btn-sm-bleed" onclick="applyBatchRecord('taken_bleed')">💊🩸 服用+出血</button>
+            <button class="btn-sm btn-sm-rest" onclick="applyBatchRecord('resting')">🍊 休薬をセット</button>
+            <button class="btn-sm btn-sm-clear" onclick="applyBatchRecord(null)">🧹 範囲内をクリア</button>
+        </div>
+    </div>
+
+    <!-- バックアップ＆リストア -->
+    <div class="card">
+        <h2>💾 データの保存と復元</h2>
+        <div class="backup-buttons">
+            <button class="btn-sm btn-sm-backup" onclick="exportData()">📥 バックアップ出力</button>
+            <button class="btn-sm btn-sm-restore" onclick="document.getElementById('importFile').click()">📤 データ復元(選択)</button>
+            <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importData(event)">
+        </div>
+    </div>
+
+    <!-- カレンダー表示 -->
+    <div class="card">
+        <div class="calendar-header">
+            <button class="nav-btn" onclick="changeMonth(-1)">‹</button>
+            <h2 id="calendarMonthLabel">2026年9月</h2>
+            <button class="nav-btn" onclick="changeMonth(1)">›</button>
+        </div>
+        <div class="calendar-grid" id="calendarGrid">
+            <!-- JSで動的に生成 -->
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="dot" style="background: var(--primary-color);"></div> 服用
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: linear-gradient(135deg, var(--primary-color) 50%, var(--bleed-color) 50%);"></div> 服用+出血
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: var(--rest-color);"></div> 休薬
+            </div>
+            <div class="legend-item">
+                <div class="dot" style="background: var(--primary-light); border: 1px dashed var(--primary-color);"></div> 120日目
+            </div>
+        </div>
+        
+        <p class="guide-text">※カレンダーの日付をタップしても個別切り替えできます</p>
+    </div>
+
+    <div style="text-align: center; margin-top: 10px;">
+        <button class="btn btn-reset" onclick="handleReset()">データを全リセット</button>
+    </div>
+
+    <script>
+// ★★★ GASのウェブアプリURLを指定 ★★★
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbybkZv7M4jo_2IiEclrLgx73yjxzuxAqalsZLkW3SN6qXrvvHRqhx43U17zFNT_LUgW/exec';
+    const LIFF_ID = 'ここにLINE_Developersで発行したLIFF_IDを貼り付け'; // LIFF設定前なら空欄でもOK
+
+    // スプレッドシート（GAS）から最新データを取得して同期
+    async function syncFromSheet() {
+        try {
+            const response = await fetch(GAS_API_URL);
+            const data = await response.json();
+            if (data && data.records) {
+                appData.records = data.records;
+                localStorage.setItem('yazflex_data_v4', JSON.stringify(appData));
+                updateUI();
+            }
+        } catch (err) {
+            console.error("スプレッドシートからの取得失敗:", err);
+        }
+    }
+
+    // 画面操作時にスプレッドシートへ直接記録を送信する関数
+    async function saveToSheet(dateStr, status) {
+        try {
+            await fetch(GAS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'saveRecord',
+                    date: dateStr,
+                    status: status
+                })
+            });
+        } catch (err) {
+            console.error("スプレッドシートへの保存失敗:", err);
+        }
+    }
+
+
+        let appData = JSON.parse(localStorage.getItem('yazflex_data_v4')) || {
+            records: {},
+            mode: 'taking',
+            restStartDay: null,
+            lastNotifiedDate: null
+        };
+
+        let currentViewDate = new Date();
+
+function saveData() {
+    localStorage.setItem('yazflex_data_v4', JSON.stringify(appData));
+    updateUI();
+
+    // 直近の記録日をスプレッドシートにも保存
+    const todayStr = getTodayStr();
+    const status = appData.records[todayStr];
+    if (status) {
+        saveToSheet(todayStr, status);
+    }
+}
+
+        function formatDate(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function getTodayStr() {
+            return formatDate(new Date());
+        }
+
+        function initDateInputs() {
+            const todayStr = getTodayStr();
+            document.getElementById('startDate').value = todayStr;
+            document.getElementById('endDate').value = todayStr;
+        }
+
+        /* --- 直近の記録日を取得（過去方向で最後に記録された日） --- */
+        function getLatestTakenOrRestDate() {
+            const todayStr = getTodayStr();
+            const keys = Object.keys(appData.records).filter(k => k <= todayStr).sort();
+            if (keys.length === 0) return null;
+            return new Date(keys[keys.length - 1]);
+        }
+
+        /* --- 連続服用日数の計算修正 --- */
+        function calculateStreak() {
+            const latestDate = getLatestTakenOrRestDate();
+            if (!latestDate) return 0;
+
+            let streak = 0;
+            let date = new Date(latestDate);
+
+            while (true) {
+                const dateStr = formatDate(date);
+                const status = appData.records[dateStr];
+
+                if (status === 'taken' || status === 'taken_bleed') {
+                    streak++;
+                    date.setDate(date.getDate() - 1);
+                } else {
+                    break;
+                }
+            }
+            return streak;
+        }
+
+        /* --- 23時 リマインド通知処理 --- */
+        function requestNotificationPermission() {
+            if (!("Notification" in window)) {
+                alert("このブラウザは通知に対応していません。iPhoneで通知を受ける場合は『ホーム画面に追加』して開いてください。");
+                return;
+            }
+
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    alert("夜23時の未服薬リマインダーを設定しました！");
+                    document.getElementById('notifyCard').style.display = 'none';
+                    checkTimeAndNotify();
+                } else {
+                    alert("通知許可が拒否されました。設定から通知を許可してください。");
+                }
+            });
+        }
+
+        function checkTimeAndNotify() {
+            const now = new Date();
+            const hours = now.getHours();
+            const todayStr = getTodayStr();
+            const status = appData.records[todayStr];
+
+            const isNotTakenYet = !(status === 'taken' || status === 'taken_bleed');
+            const notNotifiedTodayYet = appData.lastNotifiedDate !== todayStr;
+
+            if (hours >= 23 && isNotTakenYet && notNotifiedTodayYet) {
+                if ("Notification" in window && Notification.permission === "granted") {
+                    new Notification("💊 ヤーズフレックス 服薬リマインダー", {
+                        body: "夜23時になりました。今日の服薬はお済みですか？タップして記録しましょう。",
+                        icon: "https://img.icons8.com/color/180/pill.png"
+                    });
+                    appData.lastNotifiedDate = todayStr;
+                    saveData();
+                }
+            }
+        }
+
+        function scheduleNightCheck() {
+            setInterval(checkTimeAndNotify, 60000);
+        }
+
+        function exportData() {
+            const dataStr = JSON.stringify(appData, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `yazflex_backup_${getTodayStr()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    if (importedData && typeof importedData.records === 'object') {
+                        if (confirm('現在のデータを上書きして復元しますか？')) {
+                            appData = importedData;
+                            saveData();
+                            alert('データの復元が完了しました。');
+                        }
+                    } else {
+                        alert('ファイル形式が正しくありません。');
+                    }
+                } catch (err) {
+                    alert('ファイルの読み込みに失敗しました。正しいJSONファイルを選択してください。');
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        function applyBatchRecord(type) {
+            const startVal = document.getElementById('startDate').value;
+            const endVal = document.getElementById('endDate').value;
+
+            if (!startVal || !endVal) {
+                alert('開始日と終了日の両方を入力してください。');
+                return;
+            }
+
+            const start = new Date(startVal);
+            const end = new Date(endVal);
+
+            if (start > end) {
+                alert('開始日は終了日より前の日付を指定してください。');
+                return;
+            }
+
+            let curr = new Date(start);
+            while (curr <= end) {
+                const dateStr = formatDate(curr);
+                if (type) {
+                    appData.records[dateStr] = type;
+                } else {
+                    delete appData.records[dateStr];
+                }
+                curr.setDate(curr.getDate() + 1);
+            }
+
+            checkAndApply120DaysRule(new Date(endVal));
+            saveData();
+        }
+
+        function toggleTodayTake() {
+            const today = getTodayStr();
+            const current = appData.records[today];
+
+            if (current === 'taken' || current === 'taken_bleed') {
+                delete appData.records[today];
+            } else {
+                appData.records[today] = 'taken';
+            }
+            checkAndApply120DaysRule(new Date());
+            saveData();
+        }
+
+        function toggleTodayBleed() {
+            const today = getTodayStr();
+            const current = appData.records[today];
+
+            if (current === 'taken') {
+                appData.records[today] = 'taken_bleed';
+            } else if (current === 'taken_bleed') {
+                appData.records[today] = 'taken';
+            } else {
+                appData.records[today] = 'taken_bleed';
+            }
+            checkAndApply120DaysRule(new Date());
+            saveData();
+        }
+
+        function handleStartResting() {
+            const streak = calculateStreak();
+            if (streak < 24) {
+                alert('原則として24日目までは出血があっても服用を継続します。（医師の指示に従ってください）');
+            }
+            if (confirm('今日から4日間の休薬を開始しますか？')) {
+                apply4DaysRest(new Date());
+            }
+        }
+
+        function apply4DaysRest(startDate) {
+            const startStr = formatDate(startDate);
+            appData.restStartDay = startStr;
+
+            let date = new Date(startDate);
+            for (let i = 0; i < 4; i++) {
+                const dateStr = formatDate(date);
+                appData.records[dateStr] = 'resting';
+                date.setDate(date.getDate() + 1);
+            }
+            saveData();
+        }
+
+        function checkAndApply120DaysRule(targetDate) {
+            const streak = calculateStreak();
+            if (streak === 120) {
+                alert('120日連続服用を達成しました！明日から4日間の自動休薬スケジュールをセットします。');
+                const tomorrow = new Date(targetDate);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                apply4DaysRest(tomorrow);
+            }
+        }
+
+        function handleCellClick(dateStr) {
+            const states = [undefined, 'taken', 'taken_bleed', 'resting'];
+            const current = appData.records[dateStr];
+            const nextIndex = (states.indexOf(current) + 1) % states.length;
+            const nextState = states[nextIndex];
+
+            if (nextState) {
+                appData.records[dateStr] = nextState;
+            } else {
+                delete appData.records[dateStr];
+            }
+
+            checkAndApply120DaysRule(new Date(dateStr));
+            saveData();
+        }
+
+        function handleReset() {
+            if (confirm('すべての記録をクリアして初期化しますか？')) {
+                appData = { records: {}, mode: 'taking', restStartDay: null, lastNotifiedDate: null };
+                saveData();
+            }
+        }
+
+        function changeMonth(diff) {
+            currentViewDate.setMonth(currentViewDate.getMonth() + diff);
+            renderCalendar();
+        }
+
+        function updateUI() {
+            const today = getTodayStr();
+            const takeBtn = document.getElementById('takeBtn');
+            const bleedBtn = document.getElementById('bleedBtn');
+            const restBtn = document.getElementById('restBtn');
+            const statusBadge = document.getElementById('statusBadge');
+            const dayCountDisplay = document.getElementById('dayCountDisplay');
+            const subInfoDisplay = document.getElementById('subInfoDisplay');
+
+            const latestDate = getLatestTakenOrRestDate();
+            const latestStr = latestDate ? formatDate(latestDate) : today;
+            const latestStatus = appData.records[latestStr];
+
+            const isTakenToday = appData.records[today] === 'taken' || appData.records[today] === 'taken_bleed';
+            const isBleedToday = appData.records[today] === 'taken_bleed';
+
+            const currentStreak = calculateStreak();
+
+            if (latestStatus === 'resting') {
+                appData.mode = 'resting';
+            } else {
+                appData.mode = 'taking';
+            }
+
+            if (appData.mode === 'taking') {
+                statusBadge.textContent = '服用期';
+                statusBadge.className = 'status-badge badge-taking';
+                dayCountDisplay.innerHTML = `${currentStreak} <span>日目</span>`;
+
+                takeBtn.textContent = isTakenToday ? '✓ 本日の服薬完了' : '💊 今日の服薬を記録する';
+                takeBtn.className = isTakenToday ? 'btn btn-take done' : 'btn btn-take';
+
+                bleedBtn.textContent = isBleedToday ? '🩸 今日の出血を記録済み' : '🩸 今日の出血を記録する';
+                bleedBtn.className = isBleedToday ? 'btn btn-bleed done' : 'btn btn-bleed';
+
+                if (isBleedToday || currentStreak >= 24) {
+                    restBtn.style.display = 'block';
+                } else {
+                    restBtn.style.display = 'none';
+                }
+
+                if (currentStreak >= 120) {
+                    subInfoDisplay.textContent = '120日達成！明日から4日間の休薬に入りましょう。';
+                } else if (currentStreak >= 24) {
+                    subInfoDisplay.textContent = '24日経過しました。出血があれば4日間休薬可能です。';
+                } else {
+                    subInfoDisplay.textContent = `最低連続服用の24日まであと ${Math.max(0, 24 - currentStreak)} 日`;
+                }
+
+            } else {
+                statusBadge.textContent = '休薬期（4日間）';
+                statusBadge.className = 'status-badge badge-resting';
+
+                let restDays = 1;
+                if (appData.restStartDay) {
+                    const start = new Date(appData.restStartDay);
+                    const now = new Date();
+                    const diffTime = Math.max(0, now - start);
+                    restDays = Math.min(4, Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1);
+                }
+
+                dayCountDisplay.innerHTML = `${restDays} <span>日目 / 4日</span>`;
+                takeBtn.textContent = '💊 服用を再開する（服用期へ）';
+                takeBtn.className = 'btn btn-take';
+                bleedBtn.textContent = '🩸 今日の出血を記録する';
+                bleedBtn.className = isBleedToday ? 'btn btn-bleed done' : 'btn btn-bleed';
+                restBtn.style.display = 'none';
+
+                subInfoDisplay.textContent = '4日間の休薬が終わったら翌日から服用を再開してください。';
+            }
+
+            if ("Notification" in window && Notification.permission === "granted") {
+                document.getElementById('notifyCard').style.display = 'none';
+            }
+
+            renderCalendar();
+        }
+
+        function renderCalendar() {
+            const grid = document.getElementById('calendarGrid');
+            grid.innerHTML = '';
+
+            const year = currentViewDate.getFullYear();
+            const month = currentViewDate.getMonth();
+
+            document.getElementById('calendarMonthLabel').textContent = `${year}年${month + 1}月`;
+
+            const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+            weekdays.forEach(w => {
+                const el = document.createElement('div');
+                el.className = 'weekday';
+                el.textContent = w;
+                grid.appendChild(el);
+            });
+
+            const firstDay = new Date(year, month, 1).getDay();
+            const lastDate = new Date(year, month + 1, 0).getDate();
+
+            for (let i = 0; i < firstDay; i++) {
+                grid.appendChild(document.createElement('div'));
+            }
+
+            let target120DateStr = null;
+            const latestDate = getLatestTakenOrRestDate();
+            const currentStreak = calculateStreak();
+            if (appData.mode === 'taking' && currentStreak > 0 && latestDate) {
+                const targetDate = new Date(latestDate);
+                targetDate.setDate(targetDate.getDate() + (120 - currentStreak));
+                if (targetDate.getMonth() === month && targetDate.getFullYear() === year) {
+                    target120DateStr = formatDate(targetDate);
+                }
+            }
+
+            const todayStr = getTodayStr();
+            for (let d = 1; d <= lastDate; d++) {
+                const cellDate = new Date(year, month, d);
+                const dateStr = formatDate(cellDate);
+
+                const cell = document.createElement('div');
+                cell.className = 'day-cell';
+                cell.textContent = d;
+
+                const status = appData.records[dateStr];
+
+                if (dateStr === todayStr) cell.classList.add('today');
+                if (status === 'taken') cell.classList.add('taken');
+                if (status === 'taken_bleed') cell.classList.add('taken_bleed');
+                if (status === 'resting') cell.classList.add('resting');
+                if (dateStr === target120DateStr) cell.classList.add('predicted-120');
+
+                cell.onclick = () => handleCellClick(dateStr);
+                grid.appendChild(cell);
+            }
+        }
+
+        initDateInputs();
+        updateUI();
+        checkTimeAndNotify();
+        scheduleNightCheck();
+// 起動時にスプレッドシートから最新データを同期
+    syncFromSheet();
+
+    // LIFF初期化（LIFFを設定している場合）
+    if (typeof liff !== 'undefined' && LIFF_ID) {
+        liff.init({ liffId: LIFF_ID }).then(() => {
+            console.log("LIFF Launched");
+        }).catch(err => console.error(err));
+    }
+
+    </script>
+</body>
+</html>

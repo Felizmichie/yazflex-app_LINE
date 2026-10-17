@@ -300,7 +300,7 @@
     <div class="card">
         <div class="calendar-header">
             <button class="nav-btn" onclick="changeMonth(-1)">‹</button>
-            <h2 id="calendarMonthLabel">2026年9月</h2>
+            <h2 id="calendarMonthLabel">2026年10月</h2>
             <button class="nav-btn" onclick="changeMonth(1)">›</button>
         </div>
         <div class="calendar-grid" id="calendarGrid">
@@ -326,4 +326,133 @@
     </div>
 
     <script>
-        const GAS_API_URL = '
+        const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbybkZv7M4jo_2IiEclrLgx73yjxzuxAqalsZLkW3SN6qXrvvHRqhx43U17zFNT_LUgW/exec';
+        const LIFF_ID = '2012058647-cxs5YpF6';
+
+        let appData = {
+            records: {},
+            mode: 'taking',
+            restStartDay: null
+        };
+
+        let currentViewDate = new Date();
+
+        function showLoading(show) {
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay) overlay.style.display = show ? 'flex' : 'none';
+        }
+
+        async function syncFromSheet() {
+            showLoading(true);
+            try {
+                const response = await fetch(GAS_API_URL);
+                const data = await response.json();
+                if (data && data.records) {
+                    appData.records = data.records;
+                    updateUI();
+                }
+            } catch (err) {
+                console.error("スプレッドシート取得失敗:", err);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function saveToSheet(dateStr, status) {
+            showLoading(true);
+            try {
+                await fetch(GAS_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify({
+                        action: 'saveRecord',
+                        date: dateStr,
+                        status: status
+                    })
+                });
+                await syncFromSheet();
+            } catch (err) {
+                console.error("スプレッドシート保存失敗:", err);
+                showLoading(false);
+            }
+        }
+
+        async function saveBatchToSheet(recordsArray) {
+            showLoading(true);
+            try {
+                await fetch(GAS_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify({
+                        action: 'saveBatchRecords',
+                        recordsArray: recordsArray
+                    })
+                });
+                await syncFromSheet();
+            } catch (err) {
+                console.error("一括保存失敗:", err);
+                showLoading(false);
+            }
+        }
+
+        function formatDate(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function getTodayStr() {
+            return formatDate(new Date());
+        }
+
+        function initDateInputs() {
+            const todayStr = getTodayStr();
+            const startInput = document.getElementById('startDate');
+            const endInput = document.getElementById('endDate');
+            if (startInput) startInput.value = todayStr;
+            if (endInput) endInput.value = todayStr;
+        }
+
+        function getLatestTakenOrRestDate() {
+            const todayStr = getTodayStr();
+            const keys = Object.keys(appData.records).filter(k => k <= todayStr).sort();
+            if (keys.length === 0) return null;
+            return new Date(keys[keys.length - 1]);
+        }
+
+        function calculateStreak() {
+            const latestDate = getLatestTakenOrRestDate();
+            if (!latestDate) return 0;
+
+            let streak = 0;
+            let date = new Date(latestDate);
+
+            while (true) {
+                const dateStr = formatDate(date);
+                const status = appData.records[dateStr];
+
+                if (status === 'taken' || status === 'taken_bleed') {
+                    streak++;
+                    date.setDate(date.getDate() - 1);
+                } else {
+                    break;
+                }
+            }
+            return streak;
+        }
+
+        function calculateBleedStreak() {
+            const latestDate = getLatestTakenOrRestDate();
+            if (!latestDate) return 0;
+
+            let bleedStreak = 0;
+            let date = new Date(latestDate);
+
+            while (true) {
+                const dateStr = formatDate(date);
+                const status = appData.records[dateStr];
+
+                if (status === 'taken_bleed') {
+                    bleedStreak++;
+                    date.setDate
